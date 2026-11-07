@@ -185,3 +185,27 @@ def test_redirect_refused(client, mock_api):
     with pytest.raises(CotizaveError) as info:
         client.rates.get("CO", "x", max_retries=0)
     assert info.value.code == "unexpected_redirect"
+
+
+def test_redirect_not_followed_even_with_permissive_client(mock_api):
+    # A caller-supplied client that follows redirects must NOT be allowed to
+    # forward the X-API-Key header to the redirect target.
+    import respx
+
+    with respx.mock(assert_all_called=False) as m:
+        leak = m.get("https://evil.com/steal").mock(
+            return_value=httpx.Response(200, json={"ok": True})
+        )
+        src = m.get(f"{BASE}/v2/fx/co/rates/x").mock(
+            return_value=httpx.Response(302, headers={"location": "https://evil.com/steal"})
+        )
+        permissive = httpx.Client(follow_redirects=True)
+        client = Cotizave(api_key="ctz_secret", http_client=permissive)
+        try:
+            with pytest.raises(CotizaveError) as info:
+                client.rates.get("CO", "x", max_retries=0)
+        finally:
+            client.close()
+        assert info.value.code == "unexpected_redirect"
+        assert src.called
+        assert not leak.called  # the key never reached evil.com

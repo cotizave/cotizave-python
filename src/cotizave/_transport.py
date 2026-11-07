@@ -153,7 +153,10 @@ class Transport:
             method, url, headers=headers, content=content, timeout=timeout_s
         )
         try:
-            response = self._client.send(request, stream=True)
+            # follow_redirects=False is forced here, not just on our own client:
+            # a caller-supplied http_client might default to following redirects,
+            # which would forward the X-API-Key header to the redirect target.
+            response = self._client.send(request, stream=True, follow_redirects=False)
             try:
                 if response.has_redirect_location:
                     location = response.headers.get("location")
