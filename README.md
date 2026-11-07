@@ -24,7 +24,7 @@ calendars, behind a single API key.
 pip install cotizave
 ```
 
-Requires Python 3.9+. The only runtime dependency is [httpx](https://www.python-httpx.org/).
+Requires Python 3.10+. The only runtime dependency is [httpx](https://www.python-httpx.org/).
 
 ## Quick start
 

@@ -24,7 +24,7 @@ bancos y calendarios, con una sola API key.
 pip install cotizave
 ```
 
-Requiere Python 3.9+. La única dependencia en runtime es [httpx](https://www.python-httpx.org/).
+Requiere Python 3.10+. La única dependencia en runtime es [httpx](https://www.python-httpx.org/).
 
 ## Inicio rápido
 

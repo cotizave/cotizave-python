@@ -7,7 +7,7 @@ name = "cotizave"
 dynamic = ["version"]
 description = "Official Python SDK for the Cotizave API v2 — multi-country exchange-rate references, conversions, history, banks and calendars."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Cotizave" }]
@@ -26,7 +26,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -64,22 +63,21 @@ include = ["src/cotizave", "README.md", "README.es.md", "CHANGELOG.md", "LICENSE
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py310"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "C4", "SIM"]
-# The package supports Python 3.9. types.py uses the functional TypedDict syntax,
-# whose annotations are evaluated at runtime, so PEP 604 (`X | None`) and PEP 585
-# (`list[...]`) forms that only type-check on 3.10+ are kept as typing.Optional /
-# typing.List on purpose. These pyupgrade rules are therefore disabled.
+# types.py uses the functional TypedDict syntax, whose field annotations are
+# evaluated at runtime. The typing.Optional / typing.List spellings are kept there
+# for clarity and consistency, so these pyupgrade rewrite rules stay disabled.
 ignore = ["B008", "UP006", "UP007", "UP035", "UP045"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["B011"]
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.10"
 strict = true
 files = ["src/cotizave"]
 warn_unused_ignores = true
