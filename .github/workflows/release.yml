@@ -79,8 +79,11 @@ jobs:
           if [ "${{ steps.bump.outputs.changed }}" = "true" ]; then
             git commit -am "release: v$version"
           fi
-          git tag "v$version"
-          git push origin "HEAD:${{ github.ref_name }}" --follow-tags
+          # Annotated tag, pushed explicitly: --follow-tags skips lightweight tags,
+          # which left the tag unpushed and broke `gh release create`.
+          git tag -a "v$version" -m "v$version"
+          git push origin "HEAD:${{ github.ref_name }}"
+          git push origin "v$version"
 
       - name: Create GitHub Release
         env:
