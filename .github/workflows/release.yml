@@ -12,10 +12,10 @@ on:
   workflow_dispatch:
     inputs:
       bump:
-        description: Version bump
+        description: Version bump (use "none" to release the current version as-is, e.g. the first 0.1.0)
         required: true
         type: choice
-        options: [patch, minor, major]
+        options: [none, patch, minor, major]
         default: patch
 
 concurrency:
@@ -58,14 +58,17 @@ jobs:
           text = p.read_text()
           m = re.search(r'__version__ = "(\d+)\.(\d+)\.(\d+)"', text)
           major, minor, patch = (int(x) for x in m.groups())
+          changed = part != "none"
           if part == "major": major, minor, patch = major + 1, 0, 0
           elif part == "minor": minor, patch = minor + 1, 0
-          else: patch += 1
+          elif part == "patch": patch += 1
           version = f"{major}.{minor}.{patch}"
-          p.write_text(re.sub(r'__version__ = "[^"]*"', f'__version__ = "{version}"', text))
+          if changed:
+              p.write_text(re.sub(r'__version__ = "[^"]*"', f'__version__ = "{version}"', text))
           with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
               fh.write(f"version={version}\n")
-          print(f"Bumped to {version}")
+              fh.write(f"changed={'true' if changed else 'false'}\n")
+          print(f"Release version: {version} (bump={part})")
           PY
 
       - name: Commit, tag and push
@@ -73,7 +76,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           version="${{ steps.bump.outputs.version }}"
-          git commit -am "release: v$version"
+          if [ "${{ steps.bump.outputs.changed }}" = "true" ]; then
+            git commit -am "release: v$version"
+          fi
           git tag "v$version"
           git push origin "HEAD:${{ github.ref_name }}" --follow-tags
 
