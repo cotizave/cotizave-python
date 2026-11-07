@@ -1,0 +1,105 @@
+name: Release
+
+# One-click release. Run it from the Actions tab, pick a version bump, and it:
+#   1. runs the full gate, bumps the version in src/cotizave/_version.py, commits,
+#      tags and creates a GitHub Release with auto-generated notes;
+#   2. after manual approval (the `pypi` environment), publishes to PyPI with
+#      Trusted Publishing (OIDC) — no stored token.
+#
+# Requires: a `pypi` GitHub Environment with required reviewers, and a Trusted
+# Publisher configured on PyPI for this repo + `release.yml` + `pypi`.
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump
+        required: true
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the version commit/tag and create the Release
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev]" build twine
+
+      - name: Gate (lint, types, tests, build)
+        run: |
+          ruff check .
+          ruff format --check .
+          mypy
+          pytest
+          python -m build
+          twine check dist/*
+
+      - name: Bump version
+        id: bump
+        run: |
+          python - "${{ inputs.bump }}" <<'PY'
+          import os, re, sys, pathlib
+          part = sys.argv[1]
+          p = pathlib.Path("src/cotizave/_version.py")
+          text = p.read_text()
+          m = re.search(r'__version__ = "(\d+)\.(\d+)\.(\d+)"', text)
+          major, minor, patch = (int(x) for x in m.groups())
+          if part == "major": major, minor, patch = major + 1, 0, 0
+          elif part == "minor": minor, patch = minor + 1, 0
+          else: patch += 1
+          version = f"{major}.{minor}.{patch}"
+          p.write_text(re.sub(r'__version__ = "[^"]*"', f'__version__ = "{version}"', text))
+          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+              fh.write(f"version={version}\n")
+          print(f"Bumped to {version}")
+          PY
+
+      - name: Commit, tag and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          version="${{ steps.bump.outputs.version }}"
+          git commit -am "release: v$version"
+          git tag "v$version"
+          git push origin "HEAD:${{ github.ref_name }}" --follow-tags
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "v${{ steps.bump.outputs.version }}" --title "v${{ steps.bump.outputs.version }}" --generate-notes
+
+  publish:
+    needs: tag
+    runs-on: ubuntu-latest
+    environment: pypi # required-reviewers gate lives here
+    permissions:
+      id-token: write # OIDC token for Trusted Publishing
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.tag.outputs.version }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: python -m pip install --upgrade pip build
+      - name: Build
+        run: python -m build
+
+      - name: Publish to PyPI (Trusted Publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1
