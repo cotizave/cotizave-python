@@ -1,34 +1,25 @@
 name: Release
 
-# One-click release. Run it from the Actions tab, pick a version bump, and it:
-#   1. runs the full gate, bumps the version in src/cotizave/_version.py, commits,
-#      tags and creates a GitHub Release with auto-generated notes;
-#   2. after manual approval (the `pypi` environment), publishes to PyPI with
-#      Trusted Publishing (OIDC) — no stored token.
+# Tag-triggered release. To publish version X.Y.Z:
+#   1. set __version__ = "X.Y.Z" in src/cotizave/_version.py (commit it),
+#   2. git tag vX.Y.Z && git push origin vX.Y.Z
+# Pushing the tag runs the full gate, creates a GitHub Release, and — after the
+# `pypi` environment approval — publishes to PyPI with Trusted Publishing (OIDC),
+# no stored token. The tag must match __version__ or the gate fails.
 #
-# Requires: a `pypi` GitHub Environment with required reviewers, and a Trusted
-# Publisher configured on PyPI for this repo + `release.yml` + `pypi`.
+# Requires: a `pypi` GitHub Environment, and a Trusted Publisher on PyPI for this
+# repo + `release.yml` + `pypi`.
 on:
-  workflow_dispatch:
-    inputs:
-      bump:
-        description: Version bump (use "none" to release the current version as-is, e.g. the first 0.1.0)
-        required: true
-        type: choice
-        options: [none, patch, minor, major]
-        default: patch
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
 
 concurrency:
   group: release
   cancel-in-progress: false
 
 jobs:
-  tag:
+  gate:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # push the version commit/tag and create the Release
-    outputs:
-      version: ${{ steps.bump.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -39,7 +30,17 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: pip install -e ".[dev]" build twine
 
-      - name: Gate (lint, types, tests, build)
+      - name: Tag matches the package version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(python -c 'from cotizave._version import __version__; print(__version__)')"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::Tag v$tag does not match __version__ ($pkg) in src/cotizave/_version.py"
+            exit 1
+          fi
+          echo "Releasing $pkg"
+
+      - name: Gate (lint, types, tests, build, package)
         run: |
           ruff check .
           ruff format --check .
@@ -48,58 +49,15 @@ jobs:
           python -m build
           twine check dist/*
 
-      - name: Bump version
-        id: bump
-        run: |
-          python - "${{ inputs.bump }}" <<'PY'
-          import os, re, sys, pathlib
-          part = sys.argv[1]
-          p = pathlib.Path("src/cotizave/_version.py")
-          text = p.read_text()
-          m = re.search(r'__version__ = "(\d+)\.(\d+)\.(\d+)"', text)
-          major, minor, patch = (int(x) for x in m.groups())
-          changed = part != "none"
-          if part == "major": major, minor, patch = major + 1, 0, 0
-          elif part == "minor": minor, patch = minor + 1, 0
-          elif part == "patch": patch += 1
-          version = f"{major}.{minor}.{patch}"
-          if changed:
-              p.write_text(re.sub(r'__version__ = "[^"]*"', f'__version__ = "{version}"', text))
-          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
-              fh.write(f"version={version}\n")
-              fh.write(f"changed={'true' if changed else 'false'}\n")
-          print(f"Release version: {version} (bump={part})")
-          PY
-
-      - name: Commit, tag and push
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          version="${{ steps.bump.outputs.version }}"
-          if [ "${{ steps.bump.outputs.changed }}" = "true" ]; then
-            git commit -am "release: v$version"
-          fi
-          # Annotated tag, pushed explicitly: --follow-tags skips lightweight tags,
-          # which left the tag unpushed and broke `gh release create`.
-          git tag -a "v$version" -m "v$version"
-          git push origin "HEAD:${{ github.ref_name }}"
-          git push origin "v$version"
-
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release create "v${{ steps.bump.outputs.version }}" --title "v${{ steps.bump.outputs.version }}" --generate-notes
-
   publish:
-    needs: tag
+    needs: gate
     runs-on: ubuntu-latest
-    environment: pypi # required-reviewers gate lives here
+    environment: pypi # required-reviewers gate (if configured) lives here
     permissions:
+      contents: write # create the GitHub Release
       id-token: write # OIDC token for Trusted Publishing
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: v${{ needs.tag.outputs.version }}
 
       - uses: actions/setup-python@v5
         with:
@@ -108,6 +66,14 @@ jobs:
       - run: python -m pip install --upgrade pip build
       - name: Build
         run: python -m build
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --generate-notes
+          fi
 
       - name: Publish to PyPI (Trusted Publishing)
         uses: pypa/gh-action-pypi-publish@release/v1
